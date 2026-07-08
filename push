@@ -1,0 +1,4 @@
+cd webhost
+git add .
+git commit -m "Landing page v1"
+git push
