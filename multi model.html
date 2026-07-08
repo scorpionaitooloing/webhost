@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OpenRouter Multi-Model Question (Simple HTML)</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; line-height: 1.4; }
+    h1, h2, h3 { margin: 0.5em 0; }
+    label { display: block; margin: 8px 0 4px; }
+    input, textarea, button { font-size: 14px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+    .model-card {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+    }
+    .responses {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      margin-top: 16px;
+    }
+    .response-card {
+      border: 1px solid #bbb;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    .response-card strong { display: block; margin-bottom: 6px; }
+    .error { color: #b00000; }
+    small { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>OpenRouter Multi‑Model Question</h1>
+  <p>
+    This simple page lets you ask one question to multiple OpenRouter models,
+    each with its own system instruction.
+  </p>
+
+  <h2>OpenRouter API Key</h2>
+  <label for="apiKey">API Key</label>
+  <input id="apiKey" type="text" style="width: 100%; padding: 6px;" placeholder="Enter your OpenRouter API key" />
+  <small>Stored only in your browser for this session.</small>
+
+  <h2>Models & System Instructions</h2>
+  <div id="modelsContainer"></div>
+
+  <div class="row">
+    <button id="addModelBtn">Add Model</button>
+    <button id="askBtn">Ask All Models</button>
+  </div>
+
+  <h2>Your Question</h2>
+  <textarea id="question" rows="4" style="width: 100%; padding: 6px;" placeholder="Type your question here..."></textarea>
+  <div class="row">
+    <button id="askBtn2">Ask All Models</button>
+    <span id="status" style="margin-left: 8px;"></span>
+  </div>
+
+  <h2>Responses</h2>
+  <div id="responses" class="responses"></div>
+
+  <script>
+    const OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions";
+
+    const modelsContainer = document.getElementById("modelsContainer");
+    const addModelBtn = document.getElementById("addModelBtn");
+    const askBtn = document.getElementById("askBtn");
+    const askBtn2 = document.getElementById("askBtn2");
+    const questionEl = document.getElementById("question");
+    const apiKeyEl = document.getElementById("apiKey");
+    const statusEl = document.getElementById("status");
+    const responsesEl = document.getElementById("responses");
+
+    let models = [];
+
+    function addModelRow() {
+      const id = "m" + Math.random().toString(16).slice(2);
+      const modelObj = { id, model: "", systemInstruction: "" };
+      models.push(modelObj);
+
+      const card = document.createElement("div");
+      card.className = "model-card";
+      card.dataset.id = id;
+
+      const title = document.createElement("div");
+      title.textContent = "Model";
+      title.style.marginBottom = "4px";
+      card.appendChild(title);
+
+      const modelInput = document.createElement("input");
+      modelInput.type = "text";
+      modelInput.placeholder = "Model slug (e.g. anthropic/claude-sonnet-4.5)";
+      modelInput.style.width = "100%";
+      modelInput.style.padding = "6px";
+      modelInput.value = modelObj.model;
+      modelInput.addEventListener("input", (e) => {
+        modelObj.model = e.target.value;
+      });
+      card.appendChild(modelInput);
+
+      const sysLabel = document.createElement("label");
+      sysLabel.textContent = "System Instruction";
+      sysLabel.style.marginTop = "8px";
+      card.appendChild(sysLabel);
+
+      const sysInput = document.createElement("textarea");
+      sysInput.rows = 2;
+      sysInput.style.width = "100%";
+      sysInput.style.padding = "6px";
+      sysInput.placeholder = "e.g. You are a concise, factual assistant.";
+      sysInput.value = modelObj.systemInstruction;
+      sysInput.addEventListener("input", (e) => {
+        modelObj.systemInstruction = e.target.value;
+      });
+      card.appendChild(sysInput);
+
+      const removeBtn = document.createElement("button");
+      removeBtn.textContent = "Remove";
+      removeBtn.style.marginTop = "6px";
+      removeBtn.addEventListener("click", () => {
+        models = models.filter(m => m.id !== id);
+        card.remove();
+      });
+      card.appendChild(removeBtn);
+
+      modelsContainer.appendChild(card);
+    }
+
+    addModelBtn.addEventListener("click", addModelRow);
+
+    // Add one default model on load
+    addModelRow();
+    const first = models[0];
+    first.model = "anthropic/claude-sonnet-4.5";
+    first.systemInstruction = "You are a concise, factual assistant.";
+    // Update the UI for the first model
+    const firstCard = modelsContainer.querySelector(".model-card");
+    if (firstCard) {
+      firstCard.querySelector("input[type='text']").value = first.model;
+      firstCard.querySelector("textarea").value = first.systemInstruction;
+    }
+
+    async function askAllModels() {
+      const apiKey = apiKeyEl.value.trim();
+      const question = questionEl.value.trim();
+
+      if (!apiKey) {
+        alert("Please enter your OpenRouter API key.");
+        return;
+      }
+      if (!question) {
+        alert("Please enter a question.");
+        return;
+      }
+      if (models.length === 0) {
+        alert("Please add at least one model.");
+        return;
+      }
+      const invalid = models.filter(m => !m.model.trim());
+      if (invalid.length) {
+        alert("Please fill in the model slug for all models.");
+        return;
+      }
+
+      statusEl.textContent = "Running...";
+      responsesEl.innerHTML = "";
+
+      const requestBodies = models.map(m => {
+        const messages = [];
+        if (m.systemInstruction.trim()) {
+          messages.push({ role: "system", content: m.systemInstruction });
+        }
+        messages.push({ role: "user", content: question });
+        return {
+          model: m.model.trim(),
+          messages,
+        };
+      });
+
+      const results = await Promise.all(
+        requestBodies.map((body, idx) => {
+          const modelConfig = models[idx];
+          return fetch(OPENROUTER_API, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          })
+            .then(async (res) => {
+              if (!res.ok) {
+                const err = await res.text().catch(() => res.statusText);
+                return { id: modelConfig.id, model: modelConfig.model, text: "", error: err };
+              }
+              const data = await res.json();
+              const text = data.choices?.[0]?.message?.content || "";
+              return { id: modelConfig.id, model: modelConfig.model, text };
+            })
+            .catch((e) => ({ id: modelConfig.id, model: modelConfig.model, text: "", error: e.message }));
+        })
+      );
+
+      statusEl.textContent = "Done.";
+      responsesEl.innerHTML = "";
+
+      const container = document.createElement("div");
+      container.className = "responses";
+
+      for (const r of results) {
+        const card = document.createElement("div");
+        card.className = "response-card";
+
+        const title = document.createElement("strong");
+        title.textContent = r.model;
+        card.appendChild(title);
+
+        if (r.error) {
+          const err = document.createElement("div");
+          err.className = "error";
+          err.textContent = "Error: " + r.error;
+          card.appendChild(err);
+        } else {
+          const text = document.createElement("div");
+          text.textContent = r.text || "(no response)";
+          card.appendChild(text);
+        }
+
+        container.appendChild(card);
+      }
+
+      responsesEl.appendChild(container);
+    }
+
+    askBtn.addEventListener("click", askAllModels);
+    askBtn2.addEventListener("click", askAllModels);
+  </script>
+</body>
+</html>
